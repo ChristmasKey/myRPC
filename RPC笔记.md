@@ -399,4 +399,146 @@ public static void main(String[] args) {
 
 ## 消费者发起Invocation调用
 
-//TODO
+在Consumer中通过网络请求将Invocation发送出去
+
+```java
+package com.djn;
+
+import com.djn.common.Invocation;
+import com.djn.protocol.HttpClient;
+
+public class Consumer {
+
+    public static void main(String[] args) {
+
+        Invocation invocation = new Invocation(HelloService.class.getName(), "sayHello",
+                new Class[]{String.class}, new Object[]{"JiaNan"});
+
+        HttpClient httpClient = new HttpClient();
+        String result = httpClient.send("localhost", 8080, invocation);
+        System.out.println(result);
+    }
+}
+```
+
+发送网络请求需要编写一个客户端类**HttpClient**：
+
+```java
+package com.djn.protocol;
+
+import com.djn.common.Invocation;
+import org.apache.commons.io.IOUtils;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.ObjectOutputStream;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+
+/**
+ * Name: HttpClient
+ * Description:
+ * Copyright: Copyright (c) 2023 MVWCHINA All rights Reserved
+ * Company: 江苏医视教育科技发展有限公司
+ *
+ * @author 丁佳男
+ * @version 1.0
+ * @since 2023-03-14 09:19
+ */
+public class HttpClient {
+
+    public String send(String hostname, Integer port, Invocation invocation) {
+        //可以根据用户的配置去定义用什么样的方式发送Http请求
+
+        //这里使用最原始的方式
+        try {
+            URL url = new URL("http", hostname, port, "/");
+            HttpURLConnection httpURLConnection = (HttpURLConnection) url.openConnection();
+
+            httpURLConnection.setRequestMethod("POST");
+            httpURLConnection.setDoOutput(true);
+
+            //配置
+            OutputStream outputStream = httpURLConnection.getOutputStream();
+            ObjectOutputStream oos = new ObjectOutputStream(outputStream);
+
+            oos.writeObject(invocation);
+            oos.flush();
+            oos.close();
+
+            InputStream inputStream = httpURLConnection.getInputStream();
+            return IOUtils.toString(inputStream);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
+        return "";
+    }
+}
+```
+
+测试效果：先启动Provider的main方法，在执行Consumer的main方法
+
+![Provider运行结果](./images/Provider运行结果.png)
+
+![Consumer运行结果](./images/Consumer运行结果.png)
+
+
+
+## 通过动态代理优化消费者服务调用
+
+我们可以通过动态代理和反射来实现服务的调用：
+
+==>动态代理用来让Consumer调用不同的服务接口
+
+==>反射可以用来寻找并执行指定的方法
+
+```java
+package com.djn.proxy;
+
+import com.djn.common.Invocation;
+import com.djn.protocol.HttpClient;
+
+import java.lang.reflect.InvocationHandler;
+import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
+
+public class ProxyFactory {
+
+    public static <T> T getProxy(Class interfaceClass) {
+        //可以根据用户配置去定义用什么样的方式进行动态代理
+
+        Object proxyInstance = Proxy.newProxyInstance(interfaceClass.getClassLoader(),
+                new Class[]{interfaceClass},
+                (proxy, method, args) -> {
+                    Invocation invocation = new Invocation(interfaceClass.getName(),
+                            method.getName(),
+                            method.getParameterTypes(), args);
+
+                    HttpClient httpClient = new HttpClient();
+
+                    return httpClient.send("localhost", 8080, invocation);
+                });
+
+        return (T) proxyInstance;
+    }
+}
+```
+
+修改Consumer中的调用方式
+
+```java
+public static void main(String[] args) {
+    HelloService helloService = ProxyFactory.getProxy(HelloService.class);
+    String result = helloService.sayHello("JiaNan123");
+    System.out.println(result);
+}
+```
+
+
+
+## 服务注册和服务发现
+
+![服务注册与调用原理](./images/服务注册与调用原理.png)
+

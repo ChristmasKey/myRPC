@@ -8,8 +8,8 @@
         <outputRelativeToContentRoot value="true" />
         <module name="Provider" />
         <module name="JiananRPC" />
-        <module name="Provider-Common" />
         <module name="Consumer" />
+        <module name="Provider-Common" />
       </profile>
     </annotationProcessing>
   </component>

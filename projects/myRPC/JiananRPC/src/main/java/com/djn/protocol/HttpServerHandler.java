@@ -6,7 +6,6 @@ import org.apache.commons.io.IOUtils;
 
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
-import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.lang.reflect.Method;
 
@@ -36,6 +35,8 @@ public class HttpServerHandler {
             Method method = classImpl.getMethod(invocation.getMethodName(), invocation.getParameterTypes());
             //利用反射执行方法
             String result = (String) method.invoke(classImpl.newInstance(), invocation.getParameters());
+
+            //从注册中心获取实现类，并执行方法
 
             //将方法执行返回的结果写入response
             IOUtils.write(result, resp.getOutputStream());

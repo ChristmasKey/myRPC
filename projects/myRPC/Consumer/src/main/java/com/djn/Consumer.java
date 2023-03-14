@@ -1,5 +1,7 @@
 package com.djn;
 
+import com.djn.proxy.ProxyFactory;
+
 /**
  * Name: Consumer
  * Description:
@@ -13,5 +15,8 @@ package com.djn;
 public class Consumer {
 
     public static void main(String[] args) {
+        HelloService helloService = ProxyFactory.getProxy(HelloService.class);
+        String result = helloService.sayHello("JiaNan123");
+        System.out.println(result);
     }
 }
