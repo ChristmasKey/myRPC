@@ -1,5 +1,7 @@
 package com.djn.common;
 
+import java.io.Serializable;
+
 /**
  * Name: URL
  * Description:
@@ -10,7 +12,7 @@ package com.djn.common;
  * @version 1.0
  * @since 2023-03-14 17:01
  */
-public class URL {
+public class URL implements Serializable {
 
     private String hostname;
     private Integer port;

@@ -22,31 +22,25 @@ import java.net.URL;
  */
 public class HttpClient {
 
-    public String send(String hostname, Integer port, Invocation invocation) {
+    public String send(String hostname, Integer port, Invocation invocation) throws IOException {
         //可以根据用户的配置去定义用什么样的方式发送Http请求
 
         //这里使用最原始的方式
-        try {
-            URL url = new URL("http", hostname, port, "/");
-            HttpURLConnection httpURLConnection = (HttpURLConnection) url.openConnection();
+        URL url = new URL("http", hostname, port, "/");
+        HttpURLConnection httpURLConnection = (HttpURLConnection) url.openConnection();
 
-            httpURLConnection.setRequestMethod("POST");
-            httpURLConnection.setDoOutput(true);
+        httpURLConnection.setRequestMethod("POST");
+        httpURLConnection.setDoOutput(true);
 
-            //配置
-            OutputStream outputStream = httpURLConnection.getOutputStream();
-            ObjectOutputStream oos = new ObjectOutputStream(outputStream);
+        //配置
+        OutputStream outputStream = httpURLConnection.getOutputStream();
+        ObjectOutputStream oos = new ObjectOutputStream(outputStream);
 
-            oos.writeObject(invocation);
-            oos.flush();
-            oos.close();
+        oos.writeObject(invocation);
+        oos.flush();
+        oos.close();
 
-            InputStream inputStream = httpURLConnection.getInputStream();
-            return IOUtils.toString(inputStream);
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-
-        return "";
+        InputStream inputStream = httpURLConnection.getInputStream();
+        return IOUtils.toString(inputStream);
     }
 }

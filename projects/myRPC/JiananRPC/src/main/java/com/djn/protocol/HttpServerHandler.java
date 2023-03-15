@@ -36,8 +36,6 @@ public class HttpServerHandler {
             //利用反射执行方法
             String result = (String) method.invoke(classImpl.newInstance(), invocation.getParameters());
 
-            //从注册中心获取实现类，并执行方法
-
             //将方法执行返回的结果写入response
             IOUtils.write(result, resp.getOutputStream());
         } catch (Exception e) {

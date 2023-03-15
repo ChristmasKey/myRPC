@@ -488,9 +488,9 @@ public class HttpClient {
 
 ## 通过动态代理优化消费者服务调用
 
-我们可以通过动态代理和反射来实现服务的调用：
+我们可以通过动态代理和反射来优化服务的调用：
 
-==>动态代理用来让Consumer调用不同的服务接口
+==>动态代理用来让Consumer调用服务的不同接口
 
 ==>反射可以用来寻找并执行指定的方法
 
@@ -541,4 +541,285 @@ public static void main(String[] args) {
 ## 服务注册和服务发现
 
 ![服务注册与调用原理](./images/服务注册与调用原理.png)
+
+注册中心实现的三要素：
+
+①数据共享机制：用来将Provider注册的服务共享给Consumer；
+
+②心跳机制：用来监听服务提供者是否还存活；
+
+③缓存机制：数据变更的监听与更新，将Consumer调用过的服务缓存起来，以备重复调用，减少Consumer对注册中心的访问量，提高调用效率；
+
+
+
+服务需要把自己的主机名、端口号注册到注册中心，我们将这些信息抽象成一个类**URL**
+
+```java
+package com.djn.common;
+
+import java.io.Serializable;
+
+public class URL implements Serializable {
+
+    private String hostname;
+    private Integer port;
+
+    public URL(String hostname, Integer port) {
+        this.hostname = hostname;
+        this.port = port;
+    }
+
+
+    public String getHostname() {
+        return hostname;
+    }
+
+    public void setHostname(String hostname) {
+        this.hostname = hostname;
+    }
+
+    public Integer getPort() {
+        return port;
+    }
+
+    public void setPort(Integer port) {
+        this.port = port;
+    }
+}
+```
+
+
+
+然后编写一个类**MapRemoteRegister**用来实现注册中心
+
+```java
+package com.djn.register;
+
+import com.djn.common.URL;
+
+import java.io.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+public class MapRemoteRegister {
+
+    private static Map<String, List<URL>> map = new HashMap<>();
+
+    public static void register(String interfaceName, URL url) {
+        List<URL> list = map.get(interfaceName);
+        if (list == null) {
+            list = new ArrayList<>();
+        }
+        list.add(url);
+
+        map.put(interfaceName, list);
+
+        saveFile();
+    }
+
+    public static List<URL> get(String interfaceName) {
+        map = getFile();
+        return map.get(interfaceName);
+    }
+
+    public static void saveFile() {
+        try {
+            //为了实现Provider注册的服务能够被Consumer共享，我们可以将注册的服务缓存到Redis中
+            //这里由于我们的项目都是在同一台机器上，所以用文件代替Redis实现
+            FileOutputStream fileOutputStream = new FileOutputStream("/temp.txt");
+            ObjectOutputStream objectOutputStream = new ObjectOutputStream(fileOutputStream);
+            objectOutputStream.writeObject(map);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    public static Map<String, List<URL>> getFile() {
+        try {
+            FileInputStream fileInputStream = new FileInputStream("/temp.txt");
+            ObjectInputStream objectInputStream = new ObjectInputStream(fileInputStream);
+            return (Map<String, List<URL>>) objectInputStream.readObject();
+        } catch (IOException | ClassNotFoundException e) {
+            e.printStackTrace();
+        }
+
+        return null;
+    }
+}
+```
+
+
+
+接着我们在Provider中将服务进行注册
+
+```java
+public static void main(String[] args) {
+    //注册HelloService的两个实现类（本地注册）
+    LocalRegister.register(HelloService.class.getName(), "1.0", HelloServiceImpl.class);
+    LocalRegister.register(HelloService.class.getName(), "2.0", HelloServiceImpl2.class);
+
+    //注册中心服务注册
+    URL url = new URL("localhost", 8080);
+    MapRemoteRegister.register(HelloService.class.getName(), url);
+
+    //通过Netty、Tomcat等来接收网络请求
+    HttpServer httpServer = new HttpServer();
+    httpServer.start(url.getHostname(), url.getPort());
+}
+```
+
+
+
+现在我们可以修改动态代理中的服务调用方式：
+
+根据调用的接口名去发现服务 ==> 通过负载均衡选择调用的服务 ==> 发送调用请求，到本地注册中去获取实现类
+
+```java
+    public static <T> T getProxy(Class interfaceClass) {
+        //可以根据用户配置去定义用什么样的方式进行动态代理
+
+        Object proxyInstance = Proxy.newProxyInstance(interfaceClass.getClassLoader(),
+                new Class[]{interfaceClass},
+                (proxy, method, args) -> {
+                    Invocation invocation = new Invocation(interfaceClass.getName(),
+                            method.getName(),
+                            method.getParameterTypes(), args);
+
+                    HttpClient httpClient = new HttpClient();
+
+                    //服务发现
+                    List<URL> urls = MapRemoteRegister.get(interfaceClass.getName());
+
+                    //负载均衡
+                    URL url = LoadBalance.random(urls);
+
+                    //服务调用
+                    return httpClient.send(url.getHostname(), url.getPort(), invocation);
+                });
+
+        return (T) proxyInstance;
+    }
+```
+
+
+
+## 服务容错的实现
+
+在HttpClient中放开捕获异常，并抛出给ProxyFactory
+
+在ProxyFactory中实现服务容错
+
+```java
+    public static <T> T getProxy(Class interfaceClass) {
+        //可以根据用户配置去定义用什么样的方式进行动态代理
+
+        Object proxyInstance = Proxy.newProxyInstance(interfaceClass.getClassLoader(),
+                new Class[]{interfaceClass},
+                (proxy, method, args) -> {
+                    Invocation invocation = new Invocation(interfaceClass.getName(),
+                            method.getName(),
+                            method.getParameterTypes(), args);
+
+                    HttpClient httpClient = new HttpClient();
+
+                    //服务发现
+                    List<URL> urls = MapRemoteRegister.get(interfaceClass.getName());
+
+                    //负载均衡
+                    URL url = LoadBalance.random(urls);
+
+                    //服务调用
+                    String result;
+                    try {
+                        result = httpClient.send(url.getHostname(), url.getPort(), invocation);
+                    } catch (Exception e) {
+                        //这里可以实现容错的功能
+                        //可以通过error-callback去调用自定义的错误回调处理
+                        //(例如com.djn.HelloServiceErrorCallback)
+                        return "报错了";
+                    }
+                    return result;
+                });
+
+        return (T) proxyInstance;
+    }
+```
+
+
+
+## 服务重试的实现
+
+我们可以给服务调用设置重试次数，当一次服务调用失败，可以通过重试去调用相同的其他服务
+
+```java
+    public static <T> T getProxy(Class interfaceClass) {
+        //可以根据用户配置去定义用什么样的方式进行动态代理
+
+        Object proxyInstance = Proxy.newProxyInstance(interfaceClass.getClassLoader(),
+                new Class[]{interfaceClass},
+                (proxy, method, args) -> {
+                    Invocation invocation = new Invocation(interfaceClass.getName(),
+                            method.getName(),
+                            method.getParameterTypes(), args);
+
+                    HttpClient httpClient = new HttpClient();
+
+                    //服务发现
+                    List<URL> urls = MapRemoteRegister.get(interfaceClass.getName());
+
+                    //负载均衡
+                    //URL url = LoadBalance.random(urls);
+
+                    //服务调用
+                    String result = null;
+                    List<URL> invokedUrls = new ArrayList<>();
+
+                    //服务重试
+                    int max = 3;
+                    while (max > 0) {
+
+                        //负载均衡
+                        urls.removeAll(invokedUrls);
+                        URL url = LoadBalance.random(urls);
+                        invokedUrls.add(url);
+
+                        try {
+                            result = httpClient.send(url.getHostname(), url.getPort(), invocation);
+                        } catch (Exception e) {
+                            if (max-- != 0) {
+                                continue;
+                            }
+                            //这里可以实现容错的功能
+                            //可以通过error-callback去调用自定义的错误回调处理
+                            //(例如com.djn.HelloServiceErrorCallback)
+                            return "报错了";
+                        }
+                    }
+
+                    return result;
+                });
+
+        return (T) proxyInstance;
+    }
+```
+
+
+
+## 服务Mock的实现
+
+当我们的服务功能还没有开发完成，而需要优先开发Consumer，这个时候我们可以通过Mock去给服务返回一个假结果
+
+```java
+//服务Mock
+String mock = System.getProperty("mock");
+if (mock != null && mock.startsWith("return:")) {
+    return mock.replace("return:", "");
+}
+```
+
+在Consumer中设置服务的Mock返回值
+
+![设置Mock返回值](./images/设置Mock返回值.png)
 

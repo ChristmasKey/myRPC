@@ -22,7 +22,7 @@ public class Provider {
         LocalRegister.register(HelloService.class.getName(), "1.0", HelloServiceImpl.class);
         LocalRegister.register(HelloService.class.getName(), "2.0", HelloServiceImpl2.class);
 
-        //注册中心注册
+        //注册中心服务注册
         URL url = new URL("localhost", 8080);
         MapRemoteRegister.register(HelloService.class.getName(), url);
 
